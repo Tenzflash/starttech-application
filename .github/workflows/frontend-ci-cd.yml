@@ -1,0 +1,31 @@
+﻿name: Frontend CI/CD
+on:
+  push:
+    branches: [main]
+    paths: ['frontend/**']
+env:
+  AWS_REGION: us-east-1
+  S3_BUCKET: ${{ secrets.FRONTEND_S3_BUCKET }}
+  CLOUDFRONT_DIST_ID: ${{ secrets.CLOUDFRONT_DIST_ID }}
+jobs:
+  build-deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20', cache: 'npm' }
+      - run: npm ci
+      - run: npm run test -- --watchAll=false
+      - run: npm audit --production || true
+      - run: npm run build
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      - run: aws s3 sync build/ s3://${{ env.S3_BUCKET }} --delete
+      - run: aws cloudfront create-invalidation --distribution-id ${{ env.CLOUDFRONT_DIST_ID }} --paths "/*"

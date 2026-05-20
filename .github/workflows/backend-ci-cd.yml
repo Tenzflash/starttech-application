@@ -1,0 +1,37 @@
+﻿name: Backend CI/CD
+on:
+  push:
+    branches: [main]
+    paths: ['backend/**']
+env:
+  AWS_REGION: us-east-1
+  ECR_REPO: ${{ secrets.ECR_REPO_URI }}
+jobs:
+  test-scan:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: '1.21' }
+      - run: go test ./... -v
+      - run: go install github.com/securego/gosec/v2/cmd/gosec@latest
+      - run: gosec ./... || true
+  build-push:
+    needs: test-scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Login to ECR
+        run: aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin ${{ env.ECR_REPO }}
+      - run: docker build -t ${{ env.ECR_REPO }}:latest backend/
+      - run: docker pull aquasec/trivy:latest && docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:latest image ${{ env.ECR_REPO }}:latest || true
+      - run: docker push ${{ env.ECR_REPO }}:latest
